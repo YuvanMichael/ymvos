@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# ---      ----  --------------------     ---           ---   -----------    ------------                 
+# \  \    /   / |                     |  \    \        /  /  |           |  |            |
+#  \  \  /   /  |    --\      /--     |   \    \      /  /   |   ------  |    ---------- 
+#   \  \/   /   |    |  \    /   |    |    \    \    /  /    |  |      | |   | 
+#    \     /    |    |   \  /    |    |     \     --   /     |  |      | |    ----------         
+#    /    /     |    |    --     |    |      \        /      |  |      | |              | 
+#   /    /      |    |           |    |       \      /       |   ------  |   ---------- |
+#  /    /       |    |           |    |        \    /        |           |  |           |
+#  -----         ----             ----          ----          -----------    -----------
+# NAME: YMVOS
+# DESC: An installation and deployment script for YMV's Hyprland desktop.
+# WARNING: Run this script at your own risk.
+
+addrepo() { \
+    echo "#########################################################"
+    echo "## Adding the DTOS core repository to /etc/pacman.conf ##"
+    echo "#########################################################"
+    grep -qxF "[dtos-core-repo]" /etc/pacman.conf ||
+        ( echo " "; echo "[dtos-core-repo]"; echo "SigLevel = Required DatabaseOptional"; \
+        echo "Server = https://gitlab.com/dtos/\$repo/-/raw/main/\$arch") | sudo tee -a /etc/pacman.conf
+}
+
+addrepo || error "Error adding DTOS repo to /etc/pacman.conf."
+
+addkeyserver() { \
+    echo "#######################################################"
+    echo "## Adding keyservers to /etc/pacman.d/gnupg/gpg.conf ##"
+    echo "#######################################################"
+    grep -qxF "keyserver.ubuntu.com:80" /etc/pacman.d/gnupg/gpg.conf || echo "keyserver hkp://keyserver.ubuntu.com:80" | sudo tee -a /etc/pacman.d/gnupg/gpg.conf
+    grep -qxF "keyserver.ubuntu.com:443" /etc/pacman.d/gnupg/gpg.conf || echo "keyserver hkps://keyserver.ubuntu.com:443" | sudo tee -a /etc/pacman.d/gnupg/gpg.conf
+}
+
+addkeyserver || error "Error adding keyservers to /etc/pacman.d/gnupg/gpg.conf"
+
+receive_key() { \
+    local _pgpkey="A62D56CABD8DD76E"
+    echo "#####################################"
+    echo "##     Adding PGP key $_pgpkey     ##"
+    echo "#####################################"
+    sudo pacman-key --recv-key $_pgpkey
+    sudo pacman-key --lsign-key $_pgpkey
+}
+
+receive_key || error "Error receiving PGP key $_pgpkey"
+
+sudo pacman --noconfirm --needed -Sy dtos-core-repo/paru-bin || error "Error installing dtos-core-repo/paru-bin."
+
+
+# INSTALLING EVERYTHING FROM PACKAGE LIST
+
+sudo pacman --needed --ask 4 -Sy - < pkglist.txt || error "Failed to install a required package from pkglist.txt."
+
+# install waybar by building it manually
+git clone https://github.com/Alexays/Waybar
+cd Waybar
+meson build
+ninja -C build
+sudo ninja -C build install
+
+# Put my own configs in
+
+git clone https://github.com/YuvanMichael/ymvosconfigs
+git clone https://gitlab.com/dwt1/wallpapers
+sudo rm ~/.config/dmscripts/config
+sudo rm /etc/sddm.conf
+sudo rm ~/.config/fish/config.fish
+sudo rm ~/.config/alacritty/alacritty.yml
+cp ~/ymvosconfigs/dmscripts/config ~/.config/dmscripts/
+sudo cp ~/ymvosconfigs/sddm/sddm.conf /etc/
+cp ~/ymvosconfigs/fish/config.fish ~/.config/fish
+cp ~/ymvosconfigs/alacritty/alacritty.yml ~/.config/alacritty/
+mkdir ~/.config/hypr/
+mkdir ~/.config/waybar/
+cp ~/ymvosconfigs/hypr/hyprland.conf hyprpaper.conf ~/.config/hypr/
+cp ~/ymvosconfigs/waybar/style.css config.txt ~/.config/waybar/
+cp ~/ymvosconfigs/reboot.sh shutdown.sh startup.sh startupsound.mp3 ~/
+
+PS3='Set default user shell (enter number): '
+shells=("fish" "bash" "zsh" "quit")
+select choice in "${shells[@]}"; do
+    case $choice in
+         fish | bash | zsh)
+            sudo chsh $USER -s "/bin/$choice" && \
+            echo -e "$choice has been set as your default USER shell. \
+                    \nLogging out is required for this take effect."
+            break
+            ;;
+         quit)
+            echo "User quit without changing shell."
+            break
+            ;;
+         *)
+            echo "invalid option $REPLY"
+            ;;
+    esac
+done
+
+# Disable the current login manager
+sudo systemctl disable $(grep '/usr/s\?bin' /etc/systemd/system/display-manager.service | awk -F / '{print $NF}') || echo "Cannot disable current display manager."
+# Enable sddm as login manager and install the required good looking theme. 
+sudo systemctl enable sddm
+git clone https://github.com/MarianArlt/sddm-chili.git
+sudo cp -r ~/sddm-chili/ /usr/share/sddm/themes/
+sudo rm /usr/share/sddm/themes/sddm-chili/assets/background.jpg
+cp ~/wallpapers/0111.jpg /usr/share/sddm/themes/sddm-chili/assets/
+cd /usr/share/sddm/themes/sddm-chili/assets/
+mv 0111.jpg background.jpg
+cd ~
+echo "###################################"
+echo "##  Sddm set as login manager.  ##"
+echo "###################################"
+
+echo "###############################"
+echo "## YMVOS has been installed! ##"
+echo "###############################"
+
+while true; do
+    read -p "Do you want to reboot to get your ymvos? [Y/n] " yn
+    case $yn in
+        [Yy]* ) reboot;;
+        [Nn]* ) break;;
+        "" ) reboot;;
+        * ) echo "Please answer yes or no.";;
+    esac
+done
